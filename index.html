@@ -22,13 +22,9 @@ a { text-decoration: none; color: #999a63 }
 /* SVG styling */
 svg { background-color: #333333 }
 text { fill: #cbcbcb; font-size: 24px; }
-#states { fill: none; stroke: #555555; stroke-width: 0.5px; }
-rect {
-    transition: fill 0.4s;
-    -webkit-transition: fill 0.4s;
-    -o-transition: fill 0.4s;
-}
-.selected { fill: #cbcbcb }
+#states { fill: none; stroke: #555555; }
+rect { stroke: none; }
+.selected { fill: #B9C9D4 }
 .unselected { fill: #999a63 }
 </style>
 </head>
@@ -36,11 +32,15 @@ rect {
   <center>
   <div id="map"></div>
   <p style="padding-top: 70px; font-size: 120%">
-      Enter a zip code
+      Enter a postal code
   </p>
+  <label>
+    Disable zoom
+    <input name="zoom" type="checkbox" />
+  </label>
   <p>An australian version of
       <a href="http://benfry.com/">Ben Fry</a>'s
-      <a href="http://benfry.com/zipdecode/">zipdecode (2004)</a><br>
+      <a href="http://benfry.com/zipdecode/">zipdecode</a><br>
   </p>
 </center>
 
@@ -112,12 +112,75 @@ function key() {
         var start = Date.now();
 
         // Recolor all the zip dots. Sadly this is slow, a transition won't work
-        d3.select("#zipdots").selectAll("rect")
-            .attr("class", function(d) { return zipSelected(d.zip) ? "selected" : "unselected" });
+        var dots = d3.select('#zipdots').selectAll('rect')
+        var selected = dots
+          .classed('selected', false)
+          .classed('unselected', true)
+          .filter(function(d) { return zipSelected(d.zip) })
+            .classed('unselected', false)
+            .classed('selected', true)
+
+        var coords = selected[0].map(function(d) {
+          return proj([
+            +d.__data__.lon,
+            +d.__data__.lat,
+          ])
+        })
+
+        if (zoomEnabled && coords.length) {
+          zoomIn(getBBox(coords), dots)
+        } else {
+          zoomOut(dots)
+        }
 
         console.log("Update dots: " + (Date.now() - start) + "ms");
     }
 
+    function zoomIn(bounds, dots) {
+      var dx = bounds[1][0] - bounds[0][0] + 1e-10
+      var dy = bounds[1][1] - bounds[0][1] + 1e-10
+      var x = (bounds[0][0] + bounds[1][0]) / 2
+      var y = (bounds[0][1] + bounds[1][1]) / 2
+      var scale = Math.min(400, .9 / Math.max(dx / width, dy / height))
+      var translate = [width / 2 - scale * x, height / 2 - scale * y]
+
+      map.transition()
+          .duration(750)
+          .attr("transform", "translate(" + translate + ")scale(" + scale + ")")
+          .attr('stroke-width', 0.5 / scale)
+
+      dots.transition()
+          .duration(750)
+          .attr('width', 2 / scale)
+          .attr('height', 2 / scale)
+          .filter('.selected')
+            .attr('width', 3 / scale)
+            .attr('height', 3 / scale)
+    }
+
+    function zoomOut(dots) {
+      map.transition()
+          .duration(750)
+          .attr("transform", "scale(1)")
+          .attr('stroke-width', 0.5)
+
+      dots.transition()
+          .duration(750)
+          .attr('width', 1.5)
+          .attr('height', 1.5)
+    }
+
+    function getBBox (coords) {
+      return coords.reduce((a, b) => ([
+          [Math.min(b[0], a[0][0]), Math.min(b[1], a[0][1])],
+          [Math.max(b[0], a[1][0]), Math.max(b[1], a[1][1])],
+      ]), [
+          [Infinity, Infinity],
+          [-Infinity, -Infinity],
+      ])
+    }
+
+    var map
     // Display: create the SVG, draw the map
     function render(error, states, zips) {
         // Display: the main SVG container
@@ -130,8 +193,11 @@ function key() {
             .text(instructions)
             .attr("x", 20).attr("y", 50);
 
+        map = svg.append("g")
+          .attr('stroke-width', 0.5)
+
         // Display: state outlines
-        svg.append("g").attr("id", "states");
+        map.append("g").attr("id", "states")
         d3.select("#states").selectAll("path")
             .data(states.features)
           .enter().append("path")
@@ -140,20 +206,28 @@ function key() {
         var start = Date.now();
 
         // Display: all the dots for zip code centroids
-        svg.append("g").attr("id", "zipdots");
+        map.append("g").attr("id", "zipdots");
         d3.select("#zipdots").selectAll("rect")
             .data(zips)
           .enter().append("rect")
             .attr("x", function(d) { var p = proj([d.lon, d.lat]); return p ? p[0] : null; })
             .attr("y", function(d) { var p = proj([d.lon, d.lat]); return p ? p[1] : null; })
             .attr("class", "unselected")
-            .attr("width", 1).attr("height", 1);
+            .attr("width", 1.5).attr("height", 1.5);
 
         console.log("Draw dots: " + (Date.now() - start) + "ms");
 
         // Interaction: handle keyboard events (keydown to capture backspace)
         d3.select("body").on("keydown", key);
     };
+
+var zoomCheckbox = d3.select('[name=zoom]')
+var zoomEnabled = true
+zoomCheckbox.on('change', function() {
+  zoomEnabled = !zoomCheckbox.node().checked
+  updateSelection(selectedZip)
+})
+
 </script>
 
 </body>
